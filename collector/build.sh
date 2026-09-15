@@ -11,6 +11,9 @@ CRATE_DIR="$REPO_ROOT/banqi-collector"
 OUT_DIR="$DEPLOY_DIR/dist"
 FEATURES="onnx"
 
+# shellcheck source=lib.sh
+. "$SCRIPT_DIR/lib.sh"
+
 usage() {
   cat <<'EOF'
 编译 banqi-collector 并打包为安装包。
@@ -28,21 +31,6 @@ EOF
 die() {
   printf '[build] 错误: %s\n' "$*" >&2
   exit 1
-}
-
-# 产物实际要求的 glibc 版本（取动态库版本需求中的最高值），写入安装脚本供目标机前置校验。
-detect_required_glibc() {
-  local bin="$1" ver
-  ver="$(readelf --version-info "$bin" 2>/dev/null \
-    | grep -o 'GLIBC_[0-9]\+\(\.[0-9]\+\)*' \
-    | sed 's/GLIBC_//' \
-    | sort -V -u \
-    | tail -n1)"
-  if [ -z "$ver" ]; then
-    ver="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')"
-    printf '[build] 未能从二进制解析 glibc 需求，回退为构建机版本 %s\n' "$ver" >&2
-  fi
-  printf '%s' "$ver"
 }
 
 while [ $# -gt 0 ]; do
@@ -74,15 +62,17 @@ if ldd "$BIN" | grep -q 'libonnxruntime'; then
   die "产物动态依赖 libonnxruntime.so，安装包不完整（检查 ort 的 download-binaries / 链接配置）"
 fi
 
+REQ_GLIBC="$(detect_required_glibc "$BIN")"
+[ -n "$REQ_GLIBC" ] || die "无法解析产物的 glibc 需求（需要 binutils 的 readelf）"
+
 PKG="banqi-collector-${VERSION}-linux-x86_64"
 STAGE="$OUT_DIR/$PKG"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/bin"
 install -m 0755 "$BIN" "$STAGE/bin/banqi-collector"
 install -m 0755 "$SCRIPT_DIR/collector-ctl.sh" "$STAGE/bin/banqi-collector-ctl"
-REQ_GLIBC="$(detect_required_glibc "$BIN")"
-[ -n "$REQ_GLIBC" ] || die "无法确定产物所需的 glibc 版本"
 install -m 0755 "$SCRIPT_DIR/install.sh" "$STAGE/install.sh"
+# 安装脚本里的校验基线按产物实测值注入，避免目标机误判
 sed -i "s|^REQUIRED_GLIBC=.*|REQUIRED_GLIBC=\"$REQ_GLIBC\"|" "$STAGE/install.sh"
 grep -Fq "REQUIRED_GLIBC=\"$REQ_GLIBC\"" "$STAGE/install.sh" \
   || die "写入安装脚本的 glibc 校验基线失败"
@@ -95,6 +85,4 @@ tar -C "$OUT_DIR" -czf "$TARBALL" "$PKG"
 printf '[build] 产物所需最低 glibc: %s\n' "$REQ_GLIBC"
 printf '[build] 安装包: %s (%s)\n' "$TARBALL" "$(du -h "$TARBALL" | cut -f1)"
 printf '[build] sha256: %s\n' "$(sha256sum "$TARBALL" | cut -d' ' -f1)"
-if [ -n "$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')" ]; then
-  printf '[build] 目标机 glibc 低于 %s 时无法运行，请改用容器构建（deploy/collector/build-image.sh）\n' "$REQ_GLIBC"
-fi
+printf '[build] 目标机 glibc 低于 %s 时无法运行，请改用容器构建（deploy/collector/build-image.sh）\n' "$REQ_GLIBC"

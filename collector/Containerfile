@@ -6,28 +6,53 @@
 # ONNX Runtime 由 ort 静态链接进二进制（见 ort 的 download-binaries），
 # 因此运行阶段不需要任何 onnxruntime 动态库。
 #
-# 基础镜像可覆盖以调整 glibc 基线或启用 CUDA：
+# 基础镜像可覆盖，用于调整 glibc 基线或换用 CUDA 运行环境：
 #   CPU : --build-arg BUILDER_IMAGE=rust:1.93-bookworm --build-arg RUNTIME_IMAGE=debian:12-slim
 #   CUDA: --build-arg BUILDER_IMAGE=nvidia/cuda:13.0.0-devel-ubuntu24.04 \
 #         --build-arg RUNTIME_IMAGE=nvidia/cuda:13.0.0-runtime-ubuntu24.04 \
 #         --build-arg CARGO_FEATURES=onnx-cuda
 
-ARG BUILDER_IMAGE=rust:1.93-bookworm
+# 两个基础镜像的 ARG 必须声明在首个 FROM 之前，否则第二个 FROM 取不到
+ARG BUILDER_IMAGE=debian:13-slim
+ARG RUNTIME_IMAGE=debian:13-slim
+
 FROM ${BUILDER_IMAGE} AS builder
 
+ARG RUST_TOOLCHAIN=1.93.0
+
+# 工具链位置须与 rust 官方镜像一致，且必须在 rustup 安装前设置：
+# rustup 依据 CARGO_HOME / RUSTUP_HOME 决定安装位置。
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV PATH=/usr/local/cargo/bin:${PATH}
+
+# build-essential 供 C++ 静态库（ONNX Runtime）链接使用；
+# pkg-config + libssl-dev 供构建期 crate（openssl-sys）使用，不进运行时镜像。
+# rust 官方镜像已自带工具链，其余基础镜像此处按需安装
 RUN apt-get update \
- && apt-get install -y --no-install-recommends protobuf-compiler \
+ && apt-get install -y --no-install-recommends \
+      build-essential \
+      protobuf-compiler \
+      pkg-config \
+      libssl-dev \
+      curl \
+      ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+RUN if ! command -v cargo >/dev/null 2>&1; then \
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --profile minimal --default-toolchain "${RUST_TOOLCHAIN}"; \
+    fi
+
 # 与宿主一致的 crates.io 镜像，避免容器内直连 crates.io
-RUN mkdir -p /root/.cargo \
+RUN mkdir -p "${CARGO_HOME}" \
  && printf '%s\n' \
       '[source.crates-io]' \
       'replace-with = "mirror"' \
       '' \
       '[source.mirror]' \
       'registry = "sparse+https://rsproxy.cn/index/"' \
-      > /root/.cargo/config.toml
+      > "${CARGO_HOME}/config.toml"
 
 WORKDIR /src
 COPY banqi-core/ banqi-core/
@@ -35,11 +60,13 @@ COPY banqi-engine/ banqi-engine/
 COPY banqi-collector/ banqi-collector/
 
 ARG CARGO_FEATURES=onnx
+# target 目录由 build-image.sh bind 到宿主做编译缓存，挂载内容不会进入构建层，
+# 因此先把产物拷到镜像内的固定路径，供 runtime 阶段 COPY。
 RUN cd banqi-collector \
  && cargo build --release --features "${CARGO_FEATURES}" \
- && strip target/release/banqi-collector
+ && strip target/release/banqi-collector \
+ && install -m 0755 target/release/banqi-collector /opt/banqi-collector
 
-ARG RUNTIME_IMAGE=debian:12-slim
 FROM ${RUNTIME_IMAGE}
 
 # ca-certificates 为必需：采集端经 HTTPS 从 R2 下载模型 / 上传 episode
@@ -48,7 +75,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --create-home --uid 10001 banqi
 
-COPY --from=builder /src/banqi-collector/target/release/banqi-collector /usr/local/bin/banqi-collector
+COPY --from=builder /opt/banqi-collector /usr/local/bin/banqi-collector
 COPY collector.example.toml /etc/banqi/collector.example.toml
 
 USER banqi

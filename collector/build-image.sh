@@ -10,12 +10,20 @@ REPO_ROOT="$(cd "$DEPLOY_DIR/.." && pwd)"
 CRATE_DIR="$REPO_ROOT/banqi-collector"
 OUT_DIR="$DEPLOY_DIR/dist"
 CTX_DIR="$DEPLOY_DIR/.build/collector-context"
-CACHE_VOL="banqi-collector-buildcache"
+CACHE_ROOT="$DEPLOY_DIR/.build/collector-target"
 
-CPU_BUILDER="rust:1.93-bookworm"
-CPU_RUNTIME="debian:12-slim"
-CUDA_BUILDER="nvidia/cuda:13.0.0-devel-ubuntu24.04"
-CUDA_RUNTIME="nvidia/cuda:13.0.0-runtime-ubuntu24.04"
+# shellcheck source=lib.sh
+. "$SCRIPT_DIR/lib.sh"
+
+# 构建基线取 Debian 13（glibc 2.41）：ort 预编译的 ONNX Runtime 1.28 引用了
+# glibc 2.38 起才提供的 __isoc23_* 符号，Debian 12（2.36）无法链接。
+# builder 用 debian:13-slim 而非 rust 官方镜像（后者体积 1.6GB），
+# rust 工具链由 Containerfile 内 rustup 安装。
+CPU_BUILDER="debian:13-slim"
+CPU_RUNTIME="debian:13-slim"
+# CUDA 变体：runtime 需带 cuDNN（ONNX Runtime 的 CUDA EP 依赖）
+CUDA_BUILDER="nvidia/cuda:13.0.3-devel-ubuntu24.04"
+CUDA_RUNTIME="nvidia/cuda:13.0.3-cudnn-runtime-ubuntu24.04"
 
 VARIANT="cpu"
 ENGINE="${ENGINE:-}"
@@ -76,11 +84,14 @@ else
   CARGO_FEATURES="onnx"
 fi
 
+# 编译缓存按变体分开：feature 不同，制品不通用
+CACHE_DIR="$CACHE_ROOT-$VARIANT"
+
 # 构建上下文：三个 crate 去掉 target/.git 后平铺到临时目录，避免把数 GB 的
 # target 传给构建守护进程。
 echo "[image] 准备构建上下文: $CTX_DIR"
 rm -rf "$CTX_DIR"
-mkdir -p "$CTX_DIR"
+mkdir -p "$CTX_DIR" "$CACHE_DIR"
 tar -C "$REPO_ROOT" --exclude='target' --exclude='.git' -cf - \
   banqi-core banqi-engine banqi-collector | tar -C "$CTX_DIR" -xf -
 install -m 0644 "$SCRIPT_DIR/collector.example.toml" "$CTX_DIR/collector.example.toml"
@@ -92,15 +103,19 @@ echo "[image] 引擎=$ENGINE  变体=$VARIANT  features=$CARGO_FEATURES"
 echo "[image] builder=$BUILDER_IMAGE"
 echo "[image] runtime=$RUNTIME_IMAGE"
 
-# target 走命名卷缓存：首次构建需下载依赖与 ONNX Runtime，后续复用
+# target 目录持久化在宿主：首次构建需下载依赖与 ONNX Runtime 并全量编译，后续复用。
+# 注意 docker 的构建守护以 root 运行，会在该目录留下 root 属主文件。
+# --network=host 让构建过程直接使用宿主网络栈：容器内的 127.0.0.1 才是宿主的
+# 回环地址，宿主代理（HTTP_PROXY/HTTPS_PROXY）因此可用。
 "$ENGINE" build \
   --file "$SCRIPT_DIR/Containerfile" \
+  --network=host \
   --tag "$IMAGE_TAG" \
   --tag "${IMAGE_NAME}:latest" \
   --build-arg "BUILDER_IMAGE=$BUILDER_IMAGE" \
   --build-arg "RUNTIME_IMAGE=$RUNTIME_IMAGE" \
   --build-arg "CARGO_FEATURES=$CARGO_FEATURES" \
-  --mount "type=volume,source=${CACHE_VOL},destination=/src/banqi-collector/target" \
+  --volume "$CACHE_DIR:/src/banqi-collector/target" \
   "$CTX_DIR"
 
 mkdir -p "$OUT_DIR"
@@ -110,3 +125,9 @@ IMAGE_TAR="$OUT_DIR/${IMAGE_NAME}-${VERSION}-linux-x86_64.tar"
 printf '[image] 镜像: %s\n' "$IMAGE_TAG"
 printf '[image] 导出: %s (%s)\n' "$IMAGE_TAR" "$(du -h "$IMAGE_TAR" | cut -f1)"
 printf '[image] 分发后在目标机执行: %s load --input %s\n' "$ENGINE" "$(basename "$IMAGE_TAR")"
+
+# target 目录 bind 在宿主上，可直接对编译产物做依赖检查
+BUILT_BIN="$CACHE_DIR/release/banqi-collector"
+REQ_GLIBC="$(detect_required_glibc "$BUILT_BIN")"
+[ -n "$REQ_GLIBC" ] || die "无法解析容器内编译产物的 glibc 需求: $BUILT_BIN"
+printf '[image] 产物所需最低 glibc: %s\n' "$REQ_GLIBC"

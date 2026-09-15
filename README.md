@@ -18,7 +18,7 @@
 
 统一按 **x86_64 Linux** 产出。
 
-collector 的容器构建以 Debian 12 为基线（glibc 2.36），产物可在 Debian 12+ / Ubuntu 23.04+ / Arch 上运行；更旧的发行版（如 Ubuntu 22.04，glibc 2.35）需要下调 `collector/Containerfile` 的基础镜像重新构建。
+collector 产物**最低要求 glibc 2.38**（ort 预编译的 ONNX Runtime 1.28 引用了 C23 的 `__isoc23_*` 符号），因此构建基线为 Debian 13（glibc 2.41），运行环境需 Debian 13+ / Ubuntu 24.04+ / Arch。Debian 12（2.36）、Ubuntu 22.04（2.35）既无法构建也无法运行，下调基础镜像无效。
 
 ## 常用命令
 
