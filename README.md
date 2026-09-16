@@ -28,6 +28,9 @@ deploy/collector/build.sh
 deploy/collector/build.sh --cuda
 deploy/collector/build-image.sh
 deploy/collector/build-image.sh --cuda
+# 仅在用户明确要求时，构建并推送
+deploy/collector/build-image.sh --push      # 构建后推送到镜像仓库（deploy/registry.env）
+deploy/collector/run-container.sh pull      # 在目标机从镜像仓库拉取
 deploy/collector/run-container.sh up        # 在目标机以容器方式运行
 
 # 调度器：前端构建 + go build，产物复制到 dist/
@@ -39,3 +42,7 @@ deploy/training/deploy.sh --host colab
 ```
 
 各子目录的 `README.md` 有完整的部署与运行说明，其中 `collector/README.md` 与 `scheduler/README.md` 同时会被复制进对应的安装包。
+
+## 镜像仓库
+
+`registry.env` 存放镜像仓库坐标（域名 + 命名空间，非机密）。**访问凭证不落在本仓库**：用 `podman login` / `docker login` 写入引擎凭证文件，CI 用仓库 secret 在流水线内登录。镜像构建在本地完成（构建依赖三个仓库同处一个工作区，且需要宿主热编译缓存），仓库只承担存储与分发；ACR 个人版的托管构建超时 30 分钟，本项目全量构建无法在该限制内完成。

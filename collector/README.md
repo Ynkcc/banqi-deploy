@@ -12,7 +12,11 @@ deploy/collector/build.sh                 # CPU 变体
 deploy/collector/build.sh --cuda          # CUDA 变体（需本机 CUDA 13 工具链）
 deploy/collector/build-image.sh           # 容器镜像（无需宿主 Rust 工具链）
 deploy/collector/build-image.sh --cuda
+# 仅在用户明确要求时，构建并推送
+deploy/collector/build-image.sh --push    # 构建后推送到镜像仓库，不再导出 tar
 ```
+
+镜像仓库坐标取自 `deploy/registry.env`（非机密，随仓库提交），可用 `--registry` / `--namespace` 或环境变量 `BANQI_REGISTRY` / `BANQI_REGISTRY_NAMESPACE` 覆盖。**访问凭证不放在任何配置文件里**：用 `podman login` / `docker login` 写入引擎自己的凭证文件（`~/.config/containers/auth.json` 或 `~/.docker/config.json`，0600）；CI 场景用仓库 secret 在流水线内登录。
 
 产物位于 `deploy/dist/`：
 
@@ -99,16 +103,39 @@ endpoint = "http://<调度器地址>:50051"
 
 ## 三、容器部署
 
+镜像有两种分发方式，**镜像名相同**（`<registry>/<namespace>/banqi-collector-<变体>:<tag>`，另附本地短名 tag），目标机上的 `run-container.sh` 无需区分来源。
+
+### 3.1 经镜像仓库（推荐）
+
+开发机：
+
+```bash
+podman login registry.cn-hangzhou.aliyuncs.com   # 仅首次，凭证落在引擎凭证文件
+deploy/collector/build-image.sh --push          # 或 --push --cuda
+```
+
+目标机（克隆本仓库后）：
+
+```bash
+podman login registry.cn-hangzhou.aliyuncs.com   # 仅首次
+deploy/collector/run-container.sh pull --cuda
+deploy/collector/run-container.sh up --cuda
+deploy/collector/run-container.sh logs
+deploy/collector/run-container.sh down
+```
+
+个人版 ACR 的登录名是阿里云账号名，密码在控制台"访问凭证"里设置（与 AK/SK 无关，可单独重置）。`pull` 失败时会提示登录命令。注意：目标机不在杭州同地域 VPC 时走公网入口 `registry.cn-hangzhou.aliyuncs.com`（`registry-vpc.*` 只在同地域 VPC 内可用），跨境机器（如海外节点）拉取多 GB 镜像会较慢。
+
+### 3.2 经 tar 分发（无仓库/离线环境）
+
 ```bash
 # 开发机导出镜像后在目标机加载
 deploy/collector/build-image.sh --cuda
 scp deploy/dist/banqi-collector-cuda-<版本>-linux-x86_64.tar <目标机>:
 ssh <目标机> podman load --input banqi-collector-cuda-<版本>-linux-x86_64.tar
 
-# 目标机运行
+# 目标机运行（load 进来的镜像已带仓库限定名，默认镜像名即可命中）
 ./run-container.sh up --cuda
-./run-container.sh logs
-./run-container.sh down
 ```
 
 容器内以 `--config /etc/banqi/collector.toml` 启动，宿主配置文件只读挂载；宿主状态目录挂载为容器内 `/home/banqi`，模型缓存因此可以跨容器重建保留。
