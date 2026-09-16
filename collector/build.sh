@@ -76,7 +76,7 @@ install -m 0755 "$SCRIPT_DIR/install.sh" "$STAGE/install.sh"
 sed -i "s|^REQUIRED_GLIBC=.*|REQUIRED_GLIBC=\"$REQ_GLIBC\"|" "$STAGE/install.sh"
 grep -Fq "REQUIRED_GLIBC=\"$REQ_GLIBC\"" "$STAGE/install.sh" \
   || die "写入安装脚本的 glibc 校验基线失败"
-install -m 0644 "$SCRIPT_DIR/collector.example.toml" "$STAGE/collector.example.toml"
+install -m 0644 "$CRATE_DIR/collector.example.toml" "$STAGE/collector.example.toml"
 install -m 0644 "$SCRIPT_DIR/README.md" "$STAGE/README.md"
 
 TARBALL="$OUT_DIR/$PKG.tar.gz"

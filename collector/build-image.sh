@@ -94,7 +94,6 @@ rm -rf "$CTX_DIR"
 mkdir -p "$CTX_DIR" "$CACHE_DIR"
 tar -C "$REPO_ROOT" --exclude='target' --exclude='.git' -cf - \
   banqi-core banqi-engine banqi-collector | tar -C "$CTX_DIR" -xf -
-install -m 0644 "$SCRIPT_DIR/collector.example.toml" "$CTX_DIR/collector.example.toml"
 
 IMAGE_NAME="banqi-collector-${VARIANT}"
 IMAGE_TAG="${IMAGE_NAME}:${VERSION}"

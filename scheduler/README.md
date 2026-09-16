@@ -54,7 +54,7 @@ scheduler
 | `SCHEDULER_DB` | SQLite 路径，需保证目录可写 |
 | `SCHEDULER_R2_BUCKET` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_ENDPOINT_URL_S3` | R2 桶与凭据；**仅调度器持有凭据**，worker 与 trainer 零存储配置 |
 | `SCHEDULER_HTTP_ADDR` | WebUI 监听地址，默认 `127.0.0.1:8080`，无鉴权，勿暴露到公网 |
-| `SCHEDULER_VARIANT` / `SCHEDULER_GAMES_PER_TASK` / `SCHEDULER_INITIAL_REVEALED` | 变体、每批局数、课程阶段 |
+| `SCHEDULER_VARIANT` / `SCHEDULER_GAMES_PER_TASK` / `SCHEDULER_INITIAL_REVEALED` / `SCHEDULER_DATA_KIND` | 变体、每批局数、课程阶段、自对弈产出的数据类别（resnet/nnue，可 WebUI 在线切换） |
 
 后台运行（不依赖 systemd）：
 

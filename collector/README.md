@@ -95,7 +95,7 @@ banqi-collector-ctl run        # 前台运行，便于调试
 endpoint = "http://<调度器地址>:50051"
 ```
 
-完整字段说明见同目录下的 `collector.example.toml`，或仓库 `banqi-collector/ARCHITECTURE.md`。
+完整字段说明见仓库 `banqi-collector/collector.example.toml`，或 `banqi-collector/ARCHITECTURE.md`。
 
 ## 三、容器部署
 

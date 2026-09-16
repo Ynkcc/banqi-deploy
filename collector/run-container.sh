@@ -4,7 +4,6 @@
 #
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/banqi-collector"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/banqi-collector"
 CONF="$CONF_DIR/collector.toml"
@@ -82,7 +81,7 @@ gpu_args() {
 case "$cmd" in
   up)
     [ -f "$CONF" ] || die "配置文件不存在: $CONF
-  可先执行: install -Dm644 $SCRIPT_DIR/collector.example.toml $CONF"
+  可先执行: $ENGINE run --rm $IMAGE cat /etc/banqi/collector.example.toml > $CONF"
     mkdir -p "$STATE_DIR/logs"
     "$ENGINE" rm --force "$NAME" >/dev/null 2>&1 || true
     # shellcheck disable=SC2046
